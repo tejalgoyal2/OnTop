@@ -18,7 +18,7 @@ Pin up to 3 windows to always float above every other app on your screen. Works 
 > Requires macOS 13.0+ and Xcode 15+.
 
 ```bash
-git clone https://github.com/your-username/OnTop.git
+git clone https://github.com/tgoyal/OnTop.git
 cd OnTop
 ./setup.sh          # installs XcodeGen, generates .xcodeproj, opens Xcode
 ```
