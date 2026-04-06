@@ -32,8 +32,11 @@ final class PermissionsManager {
     func requestIfNeeded() {
         guard !hasAccessibility else { return }
 
-        // Trigger the system prompt (marks our app in the Accessibility list)
-        let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        // Register the app in the Accessibility list without triggering the
+        // system sheet (prompt: false). We show our own alert instead, which
+        // is less noisy — especially during development when the binary changes
+        // on every Xcode rebuild and macOS would otherwise re-prompt every time.
+        let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: false] as CFDictionary
         AXIsProcessTrustedWithOptions(opts)
 
         // Show our own explanatory alert with a direct link to the pane
@@ -46,6 +49,9 @@ final class PermissionsManager {
 
                 Open System Settings → Privacy & Security → Accessibility, \
                 then enable OnTop.
+
+                (If OnTop is already listed there, toggle it OFF then back ON — \
+                macOS requires this after every app update.)
                 """
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Open System Settings")
