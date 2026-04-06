@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Building OnTop: Three Broken APIs and One Very Clever Workaround</title>
+  <meta name="description" content="I tried to build a macOS always-on-top utility with Claude Code. Apple said no — twice. Here's the full story.">
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header>
+  <div class="inner">
+    <a class="logo" href="../index.html">tejal.dev <span>✦</span></a>
+    <nav>
+      <a href="../index.html">Posts</a>
+      <a href="https://github.com/your-username/OnTop" target="_blank">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<article>
+
+  <div class="post-header">
+    <time datetime="2026-04">April 2026</time>
+    <h1>Building OnTop: Three Broken APIs and One Very Clever Workaround</h1>
+    <p class="subtitle">
+      I tried to build a macOS "always on top" utility with Claude Code.
+      Apple said no — twice. Here's what happened.
+    </p>
+  </div>
+
+  <p>
+    I'm taking Anthropic's 101 course and one of the things they encourage is just
+    <em>building stuff</em> to understand the tools. So I decided to build something I
+    actually wanted: a utility to keep a window always on top of everything else on macOS.
+    Terminal above Xcode. Reference doc above my editor. That kind of thing.
+  </p>
+
+  <p>
+    I found a project called
+    <a href="https://github.com/itsabhishekolkha/AlwaysOnTop" target="_blank">AlwaysOnTop</a>
+    by @itsabhishekolkha and used it as a reference point. It works by using AppleScript to
+    <em>activate</em> the target app every second. That's... a lot. It's slow, it steals
+    focus, and it feels like a hack. Surely there's a proper API for this?
+  </p>
+
+  <p>There isn't. But I didn't know that yet.</p>
+
+  <h2>What vibe coding actually feels like</h2>
+
+  <p>
+    I used <a href="https://claude.ai/claude-code" target="_blank">Claude Code</a> for this
+    entire project. I want to be honest about what that experience is: it's genuinely fast,
+    it's genuinely useful, and it's not magic.
+  </p>
+
+  <p>
+    The way it worked: I described what I wanted ("always on top menu bar app, max 3 windows,
+    priority levels, no dock icon, sound feedback"), Claude planned the architecture, wrote the
+    code, and I reviewed and ran it. When things broke, we debugged together. When an approach
+    didn't work, we pivoted.
+  </p>
+
+  <p>
+    The "vibe" part is real — you're moving faster than you could alone, especially if you're
+    new to a platform. But the thinking is still yours. Claude doesn't know macOS's undocumented
+    quirks from memory. It makes reasonable hypotheses, same as any engineer would. You still
+    have to evaluate what it produces, test it, and push back when something's wrong.
+  </p>
+
+  <p>What you get is a very capable pair programmer who types faster than anyone you've met.</p>
+
+  <h2>The API hunt</h2>
+
+  <p>
+    The core challenge: how do you keep a window you don't own above all other windows?
+    On macOS, every window has a <em>level</em> in the global window stack. Normal app windows
+    are at level 0. The menu bar is at 24. Screen savers are at 1000. There's a
+    <code>kCGFloatingWindowLevel</code> (3) that's above normal apps but below the Dock.
+    Set a window's level to 3 and it floats above everything.
+  </p>
+
+  <p>
+    The problem: the public API for setting window levels (<code>NSWindow.level</code>) only
+    works for windows your process owns. For windows owned by other apps, there's nothing
+    in the public SDK.
+  </p>
+
+  <h3>Attempt 1: CGSSetWindowLevel</h3>
+
+  <p>
+    There's a private CoreGraphics function: <code>CGSSetWindowLevel</code>. You can call
+    private APIs on macOS without a sandbox (we're distributing on GitHub, not the App Store).
+    Swift's <code>@_silgen_name</code> lets you bind to any symbol by name:
+  </p>
+
+  <pre><code>@_silgen_name("CGSSetWindowLevel")
+func CGSSetWindowLevel(_ connection: Int32, _ windowID: CGWindowID, _ level: Int32) -> Int32
+
+let result = CGSSetWindowLevel(CGSMainConnectionID(), windowID, 3 /* floating */)
+// result = 0  ← success!</code></pre>
+
+  <p>
+    It returned 0. Success! Except... the window didn't move. We added diagnostic logging:
+    read the window's layer from <code>CGWindowListCopyWindowInfo</code> before and after
+    the call.
+  </p>
+
+  <pre><code>layerBefore = 0
+layerAfter  = 0</code></pre>
+
+  <p>
+    The WindowServer accepted the call, returned success, and silently did nothing.
+    It turns out <code>CGSSetWindowLevel</code> validates that your CG connection
+    <em>owns</em> the target window. If it doesn't, the call is silently ignored.
+    This is not documented anywhere.
+  </p>
+
+  <blockquote>
+    Apple's sandboxing is deep. Not just at the process level — right down in the compositor.
+    Even private APIs respect window ownership.
+  </blockquote>
+
+  <h3>Attempt 2: kAXRaiseAction</h3>
+
+  <p>
+    The Accessibility framework operates with elevated WindowServer trust — that's why
+    you need to grant Accessibility permission to any app that does window manipulation.
+    One of the things the AX framework can do is <code>kAXRaiseAction</code>: bring a
+    foreign window to the global Z-front.
+  </p>
+
+  <pre><code>AXUIElementPerformAction(windowElement, kAXRaiseAction as CFString)</code></pre>
+
+  <p>
+    This worked! Across two monitors — if a Terminal was pinned on my external display and
+    I switched to a different app on my laptop screen, the Terminal stayed in front.
+  </p>
+
+  <p>
+    Same screen: broken. When I clicked a different app on the same display, macOS brought
+    that app's windows forward — and it finished doing so <em>after</em> our raise fired.
+    We'd raise the pinned window, then macOS would put the newly active app on top. Race
+    condition, and we always lost.
+  </p>
+
+  <p>
+    We tried a 120ms delayed second raise. It helped a little and felt awful. The fundamental
+    problem: we were fighting the WindowServer for Z-order, and the WindowServer always wins.
+  </p>
+
+  <h3>Attempt 3 (the one that works): Own your window</h3>
+
+  <p>
+    The realization: we can't change another app's window level. But we can create a window
+    at any level we want — because we own it.
+  </p>
+
+  <p>
+    For each pinned window, we create a companion <code>NSWindow</code> — a borderless,
+    click-through overlay at <code>kCGFloatingWindowLevel</code> — that shows a live capture
+    of the original window. The original window keeps handling all input; the overlay just
+    shows pixels.
+  </p>
+
+  <pre><code>// OverlayWindow.swift
+final class OverlayWindow: NSWindow {
+  init(windowID: CGWindowID, level: NSWindow.Level) {
+    super.init(contentRect: .zero, styleMask: [.borderless],
+               backing: .buffered, defer: true)
+    self.level = level               // permanent — we own this window
+    self.ignoresMouseEvents = true   // click-through to whatever's behind
+    self.isOpaque = false
+    self.backgroundColor = .clear
+    self.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+    self.orderFrontRegardless()
+  }
+}</code></pre>
+
+  <p>
+    The level is set once. The WindowServer never overrides it because it's our window.
+    When the user clicks another app, that app's windows come forward — but they go to
+    level 0, and our overlay is at level 3. No race. No polling.
+  </p>
+
+  <p>
+    The live capture uses <code>CGWindowListCreateImageFromArray</code>. This API captures
+    a window's backing buffer — the offscreen copy macOS keeps for every window regardless
+    of whether it's visible. Even if the original window is completely hidden behind other
+    apps, we can still read its pixels. We refresh at 10fps (100ms timer).
+  </p>
+
+  <pre><code>let cgImage = CGWindowListCreateImageFromArray(
+  .null,             // no bounds restriction
+  [windowID],        // just this one window
+  .bestResolution    // Retina-quality
+)</code></pre>
+
+  <h2>What I learned about Claude Code</h2>
+
+  <p>
+    A few things stood out after building this:
+  </p>
+
+  <p>
+    <strong>It's good at architecture.</strong> The initial structure — PinnedWindowsStore
+    as source of truth, WindowTracker for detection, PinningEngine (later OverlayWindowManager)
+    for the mechanism, MenuBarController for the UI — came out clean. Better than what I'd
+    have designed starting from scratch.
+  </p>
+
+  <p>
+    <strong>It's honest about uncertainty.</strong> When I asked "will CGSSetWindowLevel work
+    cross-process?", Claude said it's a hypothesis worth trying, not a guarantee. That's the
+    right answer. It didn't make up confidence it didn't have.
+  </p>
+
+  <p>
+    <strong>Debugging is collaborative.</strong> When the window levels weren't changing,
+    Claude suggested adding diagnostic logging (reading <code>CGWindowListCopyWindowInfo</code>
+    before and after the call). That's exactly what you'd do with a human pair programmer.
+    We diagnosed the problem together.
+  </p>
+
+  <p>
+    <strong>Platform knowledge matters.</strong> Claude knows Swift well and macOS APIs at
+    a broad level. But undocumented behaviors — like CGSSetWindowLevel's silent ownership
+    check — aren't in any documentation, so they aren't in the training data either. You
+    still have to run the code and reason about the results.
+  </p>
+
+  <h2>The Apple API rant (brief version)</h2>
+
+  <p>
+    Every major OS has a "window always on top" concept. Windows has
+    <code>HWND_TOPMOST</code>. Linux window managers have <code>_NET_WM_STATE_ABOVE</code>.
+    macOS has... nothing. No public API for this. You can't do it through the sandbox.
+    You can barely do it outside the sandbox.
+  </p>
+
+  <p>
+    The end result of our three-attempt journey is an app that:
+    <ul>
+      <li>Requires Accessibility permission (to <em>detect</em> which window to pin)</li>
+      <li>Requires Screen Recording permission (to <em>show</em> the pinned window)</li>
+      <li>Doesn't actually change the pinned window's level at all</li>
+      <li>Shows you a <em>picture</em> of the window at floating level instead</li>
+    </ul>
+  </p>
+
+  <p>
+    It's technically a lie. The "pinned" window is still at level 0. We're displaying a
+    photo of it that's at level 3. But it works — and it works better than the alternatives.
+  </p>
+
+  <p>
+    If Apple ever adds a public <code>NSWindow.pinAboveAll()</code>, the entire
+    <code>OverlayWindowManager.swift</code> becomes one line of code.
+    Until then: we have 200 lines and a permission dialog.
+  </p>
+
+  <h2>Try it yourself</h2>
+
+  <p>
+    The code is on GitHub: <a href="https://github.com/your-username/OnTop" target="_blank">your-username/OnTop</a>.
+    The commit history tells the whole story — you can see the CGSSetWindowLevel attempt,
+    the kAXRaiseAction detour, and the final overlay approach as separate commits.
+  </p>
+
+  <p>
+    If you're taking Anthropic's 101 course or just starting with Claude Code: build
+    something you actually want. The constraints of a real project teach you more than
+    any tutorial.
+  </p>
+
+  <hr>
+
+  <p style="color:var(--muted); font-size:0.9rem;">
+    Built with Claude Code (Anthropic) · Posted April 2026
+  </p>
+
+</article>
+</main>
+
+<footer>
+  Built with plain HTML · Hosted on GitHub Pages ·
+  <a href="https://github.com/your-username/OnTop">Source on GitHub</a>
+</footer>
+
+</body>
+</html>
