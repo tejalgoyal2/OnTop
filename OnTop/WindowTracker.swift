@@ -7,7 +7,6 @@
 // its windows at floating level — that's permanent. No timer needed for "on top".
 
 import AppKit
-import ApplicationServices
 
 final class WindowTracker {
     static let shared = WindowTracker()
@@ -52,57 +51,59 @@ final class WindowTracker {
 
     struct FrontmostInfo {
         let windowID: CGWindowID
-        let axElement: AXUIElement
         let appName: String
         let windowTitle: String
         let pid: pid_t
     }
 
+    /// Finds the topmost on-screen window that doesn't belong to OnTop.
+    /// Uses CGWindowList (no Accessibility permission required) instead of
+    /// the AX API, which is unreliable during Xcode development.
     func frontmostWindow() -> FrontmostInfo? {
-        guard let app = NSWorkspace.shared.frontmostApplication else {
-            NSLog("OnTop: no frontmost application")
-            return nil
-        }
-        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
-            NSLog("OnTop: frontmost app is OnTop itself — focus another window first")
-            return nil
-        }
+        let myPID = ProcessInfo.processInfo.processIdentifier
 
-        NSLog("OnTop: frontmost app is %@ (pid %d)", app.localizedName ?? "?", app.processIdentifier)
-
-        let pid = app.processIdentifier
-        let appElement = AXUIElementCreateApplication(pid)
-
-        var windowRef: CFTypeRef?
-        let axResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
-        guard axResult == .success, let windowElement = windowRef as! AXUIElement? else {
-            NSLog("OnTop: AXUIElementCopyAttributeValue failed (%d) — accessibility may not be granted", axResult.rawValue)
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[CFString: Any]] else {
+            NSLog("OnTop: CGWindowListCopyWindowInfo returned nil")
             return nil
         }
 
-        var windowID: CGWindowID = 0
-        guard _AXUIElementGetWindow(windowElement, &windowID) == .success, windowID != 0 else {
-            NSLog("OnTop: _AXUIElementGetWindow failed — could not get CGWindowID")
-            return nil
+        for info in windowList {
+            guard
+                let pid      = info[kCGWindowOwnerPID] as? pid_t,
+                pid != myPID,
+                let windowID = info[kCGWindowNumber]    as? CGWindowID,
+                let layer    = info[kCGWindowLayer]     as? Int,
+                layer == 0   // normal app windows only (skip menu bar, overlays, etc.)
+            else { continue }
+
+            // Skip tiny windows (invisible helpers, status-item backing windows, etc.)
+            if let bounds = info[kCGWindowBounds] as? [String: CGFloat] {
+                let w = bounds["Width"]  ?? 0
+                let h = bounds["Height"] ?? 0
+                if w < 50 || h < 50 { continue }
+            }
+
+            let appName = NSRunningApplication(processIdentifier: pid)?.localizedName
+                ?? info[kCGWindowOwnerName] as? String
+                ?? "Unknown"
+
+            let windowTitle = info[kCGWindowName] as? String ?? appName
+
+            NSLog("OnTop: detected window '%@' (ID %u) from %@ (pid %d)",
+                  windowTitle, windowID, appName, pid)
+
+            return FrontmostInfo(
+                windowID:    windowID,
+                appName:     appName,
+                windowTitle: windowTitle,
+                pid:         pid
+            )
         }
 
-        var titleRef: CFTypeRef?
-        let title: String
-        if AXUIElementCopyAttributeValue(windowElement, kAXTitleAttribute as CFString, &titleRef) == .success,
-           let str = titleRef as? String, !str.isEmpty {
-            title = str
-        } else {
-            title = app.localizedName ?? "Unknown"
-        }
-
-        NSLog("OnTop: detected window '%@' (ID %u) from %@", title, windowID, app.localizedName ?? "?")
-        return FrontmostInfo(
-            windowID: windowID,
-            axElement: windowElement,
-            appName: app.localizedName ?? "Unknown",
-            windowTitle: title,
-            pid: pid
-        )
+        NSLog("OnTop: no suitable window found in CGWindowList (%d entries)", windowList.count)
+        return nil
     }
 
     // MARK: - Cleanup

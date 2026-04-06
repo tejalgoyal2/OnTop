@@ -60,7 +60,6 @@ final class MenuBarController: NSObject {
 
             let pw = PinnedWindow(
                 windowID:    info.windowID,
-                axElement:   info.axElement,
                 appName:     info.appName,
                 windowTitle: info.windowTitle,
                 pid:         info.pid

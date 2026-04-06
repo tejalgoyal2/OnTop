@@ -38,7 +38,8 @@ final class PinningEngine {
             $0.level.rawValue < $1.level.rawValue
         }
         for w in sorted {
-            raise(axElement: w.axElement)
+            let axElement = AXUIElementCreateApplication(w.pid)
+            raise(axElement: axElement)
         }
     }
 
@@ -47,7 +48,8 @@ final class PinningEngine {
     /// Raise a window immediately when it's pinned — gives instant visual feedback.
     @discardableResult
     func pin(window: PinnedWindow) -> Bool {
-        return raise(axElement: window.axElement)
+        let axElement = AXUIElementCreateApplication(window.pid)
+        return raise(axElement: axElement)
     }
 
     /// Unpinning has no OS-level state to undo — we simply stop re-raising the window.

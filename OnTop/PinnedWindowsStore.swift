@@ -28,7 +28,6 @@ enum PinLevel: Int, CaseIterable, Equatable {
 /// A snapshot of a window at the moment it was pinned.
 final class PinnedWindow {
     let windowID: CGWindowID
-    let axElement: AXUIElement
     let appName: String
     let windowTitle: String
     let pid: pid_t
@@ -36,14 +35,12 @@ final class PinnedWindow {
 
     init(
         windowID: CGWindowID,
-        axElement: AXUIElement,
         appName: String,
         windowTitle: String,
         pid: pid_t,
         level: PinLevel = .one
     ) {
         self.windowID    = windowID
-        self.axElement   = axElement
         self.appName     = appName
         self.windowTitle = windowTitle
         self.pid         = pid
