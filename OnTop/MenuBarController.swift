@@ -2,7 +2,6 @@
 // Owns the NSStatusItem and builds the menu fresh on every open (NSMenuDelegate).
 
 import AppKit
-import ApplicationServices
 
 final class MenuBarController: NSObject {
 
@@ -38,12 +37,9 @@ final class MenuBarController: NSObject {
     // MARK: - Public API
 
     func togglePinFrontmost() {
-        // Skip the AXIsProcessTrusted() pre-check — it is unreliable during
-        // Xcode development (binary changes on each rebuild). Instead, try
-        // the AX operations directly and give clear feedback if they fail.
         guard let info = tracker.frontmostWindow() else {
             NSSound(named: "Basso")?.play()
-            showPinFailureAlert()
+            showNoPinnableWindowAlert()
             return
         }
 
@@ -55,8 +51,13 @@ final class MenuBarController: NSObject {
             showCapacityAlert()
             return
         } else {
-            // Ensure Screen Recording permission before the first capture attempt
-            PermissionsManager.shared.requestScreenRecordingIfNeeded()
+            // Screen Recording is required to capture another app's window pixels.
+            // Gate on it being granted — without it the overlay is transparent.
+            guard PermissionsManager.shared.hasScreenRecording else {
+                PermissionsManager.shared.requestScreenRecordingIfNeeded()
+                showScreenRecordingAlert()
+                return
+            }
 
             let pw = PinnedWindow(
                 windowID:    info.windowID,
@@ -91,21 +92,23 @@ final class MenuBarController: NSObject {
         statusItem.button?.image?.isTemplate = true
     }
 
-    private func showPinFailureAlert() {
+    private func showNoPinnableWindowAlert() {
         let alert = NSAlert()
-        alert.messageText = "Could Not Detect Frontmost Window"
+        alert.messageText = "No Window to Pin"
+        alert.informativeText = "Make sure another app's window is visible on screen before pinning."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func showScreenRecordingAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Screen Recording Permission Required"
         alert.informativeText = """
-            Make sure:
+            OnTop needs Screen Recording to display pinned windows above others.
 
-            1. Accessibility is enabled for OnTop in \
-            System Settings → Privacy & Security → Accessibility.
-
-            2. Another app's window (not OnTop) is in focus \
-            before pinning.
-
-            3. If you just granted permission, quit OnTop \
-            from this menu and re-open it — macOS sometimes \
-            requires a restart to pick up the change.
+            Grant it in System Settings \u{2192} Privacy & Security \u{2192} Screen Recording, \
+            then try pinning again.
             """
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
@@ -113,7 +116,7 @@ final class MenuBarController: NSObject {
 
         if alert.runModal() == .alertFirstButtonReturn {
             NSWorkspace.shared.open(
-                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
             )
         }
     }
@@ -162,7 +165,7 @@ final class MenuBarController: NSObject {
 
         menu.addItem(.separator())
 
-        menu.addItem(makeItem("Preferences…") { AppDelegate.shared?.openPreferences() })
+        menu.addItem(makeItem("Preferences\u{2026}") { AppDelegate.shared?.openPreferences() })
 
         let loginItem = makeItem("Launch at Login") { [weak self] in self?.toggleLaunchAtLogin() }
         loginItem.state = LoginItemManager.shared.isEnabled ? .on : .off

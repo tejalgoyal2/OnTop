@@ -13,22 +13,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
-
-        // Hide from Dock (belt-and-suspenders alongside LSUIElement in Info.plist)
         NSApp.setActivationPolicy(.accessory)
-
-        // Always create the menu bar immediately. Permission prompts are
-        // deferred to the first pin attempt — this avoids a blocking modal
-        // at startup and sidesteps AXIsProcessTrusted() being stale during
-        // Xcode development (binary changes on every rebuild).
         launchApp()
-        NSLog("OnTop: launched — menu bar icon ready")
+    }
+
+    /// Prevent the app from quitting when overlay windows are closed (e.g. Unpin All).
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Stop the tracker (timers + observers). No OS-level window state to restore
-        // since our overlay windows are owned by us — closing them is enough,
-        // and they close automatically when our process exits.
+        // Stop the capture timer first, then the tracker — avoids the timer
+        // firing on windows that are mid-teardown.
+        OverlayWindowManager.shared.removeAll()
         WindowTracker.shared.stop()
     }
 
