@@ -51,19 +51,6 @@ final class MenuBarController: NSObject {
             showCapacityAlert()
             return
         } else {
-            // Verify Screen Recording by attempting the real capture — never
-            // trust CGPreflightScreenCaptureAccess() which returns stale
-            // results during Xcode development (same bug as AXIsProcessTrusted).
-            let testArray = [NSNumber(value: info.windowID)] as CFArray
-            guard CGImage(
-                windowListFromArrayScreenBounds: .null,
-                windowArray: testArray,
-                imageOption: .bestResolution
-            ) != nil else {
-                showScreenRecordingAlert()
-                return
-            }
-
             let pw = PinnedWindow(
                 windowID:    info.windowID,
                 appName:     info.appName,
@@ -104,29 +91,6 @@ final class MenuBarController: NSObject {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-
-    private func showScreenRecordingAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Screen Recording Permission Required"
-        alert.informativeText = """
-            OnTop needs Screen Recording to capture and display pinned \
-            windows above others.
-
-            1. Open System Settings \u{2192} Privacy & Security \u{2192} Screen Recording
-            2. Toggle ON for OnTop
-            3. If macOS asks you to quit & reopen, do that
-            4. Then try pinning again
-            """
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "OK")
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(
-                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
-            )
-        }
     }
 
     private func showCapacityAlert() {
