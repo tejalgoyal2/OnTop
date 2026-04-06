@@ -1,0 +1,28 @@
+# Xcode build artifacts
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+*.resolved
+
+# OS files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Temp & logs
+*.log
+*.tmp
+
+# Compiled binaries
+*.o
+*.a
+*.dylib
+
+# Claude project metadata (local only)
+.claude/
