@@ -1,9 +1,9 @@
 // WindowTracker.swift
-// Two responsibilities:
+// Three responsibilities:
 //   1. Detect the frontmost window the user wants to pin.
-//   2. Clean up when pinned windows close / apps quit.
-//
-// Raising pinned windows above others is PinningEngine's job.
+//   2. Re-apply window levels whenever a new app comes to front
+//      (macOS may reset levels on focus change — we fight back).
+//   3. Clean up when pinned windows close / apps quit.
 
 import AppKit
 import ApplicationServices
@@ -13,6 +13,7 @@ final class WindowTracker {
 
     var onWindowRemoved: (() -> Void)?
 
+    private var appActivationObserver: Any?
     private var terminationObserver: Any?
     private var sweepTimer: Timer?
 
@@ -21,6 +22,16 @@ final class WindowTracker {
     // MARK: - Lifecycle
 
     func start() {
+        // Re-raise pinned windows every time the user switches apps.
+        // macOS resets the global Z-order on app activation so we re-assert our level.
+        appActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.reapplyAll()
+        }
+
         terminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification,
             object: nil,
@@ -31,7 +42,7 @@ final class WindowTracker {
             self?.handleAppTermination(pid: app.processIdentifier)
         }
 
-        // 3-second sweep: catches individual windows closed without the app quitting
+        // 3-second sweep: catches windows closed without the app quitting
         sweepTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.sweepClosedWindows()
         }
@@ -39,6 +50,10 @@ final class WindowTracker {
     }
 
     func stop() {
+        if let obs = appActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            appActivationObserver = nil
+        }
         if let obs = terminationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(obs)
             terminationObserver = nil
@@ -91,6 +106,12 @@ final class WindowTracker {
         )
     }
 
+    // MARK: - Re-apply levels (called on every app activation)
+
+    private func reapplyAll() {
+        PinningEngine.shared.reapplyAll()
+    }
+
     // MARK: - Cleanup
 
     private func handleAppTermination(pid: pid_t) {
@@ -116,6 +137,7 @@ final class WindowTracker {
         var removed = false
 
         for w in store.windows where !activeIDs.contains(w.windowID) {
+            PinningEngine.shared.unpin(windowID: w.windowID)
             store.remove(windowID: w.windowID)
             removed = true
         }
