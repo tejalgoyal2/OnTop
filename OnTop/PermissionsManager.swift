@@ -75,13 +75,4 @@ final class PermissionsManager {
         CGRequestScreenCaptureAccess()
     }
 
-    // MARK: - Wait helper
-
-    /// Polls until Accessibility is granted, then calls the completion handler.
-    func waitForPermission(completion: @escaping () -> Void) {
-        guard !hasAccessibility else { completion(); return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.waitForPermission(completion: completion)
-        }
-    }
 }

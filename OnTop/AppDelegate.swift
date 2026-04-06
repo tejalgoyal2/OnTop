@@ -17,17 +17,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide from Dock (belt-and-suspenders alongside LSUIElement in Info.plist)
         NSApp.setActivationPolicy(.accessory)
 
-        // Check accessibility permission; prompt if missing
-        let perms = PermissionsManager.shared
-        if perms.hasAccessibility {
-            launchApp()
-        } else {
-            perms.requestIfNeeded()
-            // Keep checking in the background; once granted, finish startup
-            perms.waitForPermission { [weak self] in
-                self?.launchApp()
-            }
+        // Prompt for accessibility if not yet granted — the actual pin action
+        // in MenuBarController.togglePinFrontmost() re-checks before each use,
+        // so we can proceed with creating the menu bar icon immediately.
+        if !PermissionsManager.shared.hasAccessibility {
+            PermissionsManager.shared.requestIfNeeded()
         }
+
+        launchApp()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
