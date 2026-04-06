@@ -59,20 +59,32 @@ final class WindowTracker {
     }
 
     func frontmostWindow() -> FrontmostInfo? {
-        guard
-            let app = NSWorkspace.shared.frontmostApplication,
-            app.processIdentifier != ProcessInfo.processInfo.processIdentifier
-        else { return nil }
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            NSLog("OnTop: no frontmost application")
+            return nil
+        }
+        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            NSLog("OnTop: frontmost app is OnTop itself — focus another window first")
+            return nil
+        }
+
+        NSLog("OnTop: frontmost app is %@ (pid %d)", app.localizedName ?? "?", app.processIdentifier)
 
         let pid = app.processIdentifier
         let appElement = AXUIElementCreateApplication(pid)
 
         var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let windowElement = windowRef as! AXUIElement? else { return nil }
+        let axResult = AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef)
+        guard axResult == .success, let windowElement = windowRef as! AXUIElement? else {
+            NSLog("OnTop: AXUIElementCopyAttributeValue failed (%d) — accessibility may not be granted", axResult.rawValue)
+            return nil
+        }
 
         var windowID: CGWindowID = 0
-        guard _AXUIElementGetWindow(windowElement, &windowID) == .success, windowID != 0 else { return nil }
+        guard _AXUIElementGetWindow(windowElement, &windowID) == .success, windowID != 0 else {
+            NSLog("OnTop: _AXUIElementGetWindow failed — could not get CGWindowID")
+            return nil
+        }
 
         var titleRef: CFTypeRef?
         let title: String
@@ -83,6 +95,7 @@ final class WindowTracker {
             title = app.localizedName ?? "Unknown"
         }
 
+        NSLog("OnTop: detected window '%@' (ID %u) from %@", title, windowID, app.localizedName ?? "?")
         return FrontmostInfo(
             windowID: windowID,
             axElement: windowElement,

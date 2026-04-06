@@ -38,13 +38,12 @@ final class MenuBarController: NSObject {
     // MARK: - Public API
 
     func togglePinFrontmost() {
-        guard PermissionsManager.shared.hasAccessibility else {
-            PermissionsManager.shared.requestIfNeeded()
-            return
-        }
-
+        // Skip the AXIsProcessTrusted() pre-check — it is unreliable during
+        // Xcode development (binary changes on each rebuild). Instead, try
+        // the AX operations directly and give clear feedback if they fail.
         guard let info = tracker.frontmostWindow() else {
             NSSound(named: "Basso")?.play()
+            showPinFailureAlert()
             return
         }
 
@@ -91,6 +90,33 @@ final class MenuBarController: NSObject {
         let name = store.isEmpty ? "pin" : "pin.fill"
         statusItem.button?.image = NSImage(systemSymbolName: name, accessibilityDescription: "OnTop")
         statusItem.button?.image?.isTemplate = true
+    }
+
+    private func showPinFailureAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Could Not Detect Frontmost Window"
+        alert.informativeText = """
+            Make sure:
+
+            1. Accessibility is enabled for OnTop in \
+            System Settings → Privacy & Security → Accessibility.
+
+            2. Another app's window (not OnTop) is in focus \
+            before pinning.
+
+            3. If you just granted permission, quit OnTop \
+            from this menu and re-open it — macOS sometimes \
+            requires a restart to pick up the change.
+            """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "OK")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            NSWorkspace.shared.open(
+                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+            )
+        }
     }
 
     private func showCapacityAlert() {
