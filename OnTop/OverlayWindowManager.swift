@@ -5,13 +5,13 @@
 //
 // For each pinned window we create a companion OverlayWindow (our process, our
 // rules) at kCGFloatingWindowLevel that shows a live 10fps capture of the
-// original window via CGWindowListCreateImageFromArray. The capture works even
-// when the original window is occluded (behind Xcode, etc.) because macOS
-// maintains each window's offscreen backing buffer regardless of visibility.
+// original window via CGImage(windowListFromArrayScreenBounds:windowArray:imageOption:).
+// The capture works even when the original window is occluded (behind Xcode, etc.)
+// because macOS maintains each window's offscreen backing buffer regardless of visibility.
 //
 // Performance vs AlwaysOnTop's approach:
 //   AlwaysOnTop: AppleScript activate every ~1s (expensive IPC) + 0.5s timer
-//   Overlay:     CGWindowListCreateImageFromArray every 100ms (GPU-backed, cheap)
+//   Overlay:     CGImage window capture every 100ms (GPU-backed, cheap)
 //                + zero cost for the "always on top" part (our window level is permanent)
 //
 // Requires: Screen Recording permission (to read another app's window pixels)
@@ -116,10 +116,11 @@ final class OverlayWindowManager {
 
     private func captureWindowImage(windowID: CGWindowID) -> NSImage? {
         let windowList = [NSNumber(value: windowID)] as CFArray
-        guard let cgImage = CGWindowListCreateImageFromArray(
-            .null,         // no bounds restriction — capture the full window
-            windowList,
-            .bestResolution
+        // CGWindowListCreateImageFromArray was deprecated; use the Swift initializer instead.
+        guard let cgImage = CGImage(
+            windowListFromArrayScreenBounds: .null,   // no bounds restriction — full window
+            windowArray: windowList,
+            imageOption: .bestResolution
         ) else { return nil }
 
         // Build NSImage with the correct point size so NSImageView scales correctly
