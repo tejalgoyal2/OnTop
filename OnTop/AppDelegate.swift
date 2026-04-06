@@ -31,9 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // kAXRaiseAction doesn't make persistent window-level changes, so there's
-        // nothing to restore. Windows naturally settle back to their normal Z-order
-        // once we stop re-raising them.
+        // Stop the tracker (timers + observers). No OS-level window state to restore
+        // since our overlay windows are owned by us — closing them is enough,
+        // and they close automatically when our process exits.
         WindowTracker.shared.stop()
     }
 

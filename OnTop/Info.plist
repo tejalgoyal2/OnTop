@@ -31,5 +31,8 @@
     <key>NSAccessibilityUsageDescription</key>
     <string>OnTop needs Accessibility access to detect which window is in front so it can pin it above all others.</string>
 
+    <!-- Screen Recording usage description — required to capture window pixels for the overlay -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>OnTop needs Screen Recording access to display a live preview of your pinned window above all others.</string>
 </dict>
 </plist>

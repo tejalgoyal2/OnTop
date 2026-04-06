@@ -4,11 +4,9 @@
 // _AXUIElementGetWindow is the only reliable way to map from the Accessibility
 // world (AXUIElement) to the CoreGraphics world (CGWindowID).
 //
-// NOTE: CGSSetWindowLevel was attempted and confirmed non-functional for
-// cross-process windows. It returns 0 (success) but inspection via
-// CGWindowListCopyWindowInfo shows layerBefore=0 and layerAfter=0 —
-// the WindowServer silently ignores the call for windows it doesn't own.
-// Removed CGSSetWindowLevel and CGSMainConnectionID accordingly.
+// Note: CGSSetWindowLevel was attempted but confirmed non-functional for
+// cross-process windows — it returns success (0) but layerAfter stays at 0.
+// We no longer reference it here.
 
 import ApplicationServices
 

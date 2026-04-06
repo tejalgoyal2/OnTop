@@ -10,7 +10,7 @@ final class MenuBarController: NSObject {
 
     private let statusItem: NSStatusItem
     private let store   = PinnedWindowsStore.shared
-    private let engine  = PinningEngine.shared
+    private let overlay = OverlayWindowManager.shared
     private let tracker = WindowTracker.shared
 
     private(set) var isPaused = false
@@ -56,6 +56,9 @@ final class MenuBarController: NSObject {
             showCapacityAlert()
             return
         } else {
+            // Ensure Screen Recording permission before the first capture attempt
+            PermissionsManager.shared.requestScreenRecordingIfNeeded()
+
             let pw = PinnedWindow(
                 windowID:    info.windowID,
                 axElement:   info.axElement,
@@ -64,7 +67,7 @@ final class MenuBarController: NSObject {
                 pid:         info.pid
             )
             store.add(pw)
-            engine.pin(window: pw)
+            overlay.createOverlay(for: pw)
             playPinSound()
         }
 
@@ -73,8 +76,9 @@ final class MenuBarController: NSObject {
 
     // MARK: - Core pin/unpin
 
+    /// Single authoritative unpin that removes overlay + store entry.
     private func doUnpin(windowID: CGWindowID) {
-        engine.unpin(windowID: windowID)
+        overlay.removeOverlay(for: windowID)
         store.remove(windowID: windowID)
     }
 
@@ -171,8 +175,7 @@ final class MenuBarController: NSObject {
 
     private func setLevel(_ level: PinLevel, for windowID: CGWindowID) {
         store.setLevel(level, for: windowID)
-        // Re-apply the new level — PinningEngine reads it from the store's PinnedWindow.
-        if let w = store.window(for: windowID) { engine.pin(window: w) }
+        overlay.updateLevel(windowID: windowID, level: level)
     }
 
     private func unpinWindow(windowID: CGWindowID) {
@@ -184,18 +187,18 @@ final class MenuBarController: NSObject {
     private func togglePause() {
         isPaused.toggle()
         if isPaused {
-            // Unpin all at the OS level but keep the store intact
-            for w in store.windows { engine.unpin(windowID: w.windowID) }
+            // Hide all overlays without removing them from the store
+            overlay.removeAll()
             NSSound(named: "Pop")?.play()
         } else {
-            // Re-apply all levels
-            engine.reapplyAll()
+            // Recreate overlays for all still-pinned windows
+            for w in store.windows { overlay.createOverlay(for: w) }
             NSSound(named: "Tink")?.play()
         }
     }
 
     private func unpinAll() {
-        engine.unpinAll()
+        overlay.removeAll()
         store.removeAll()
         isPaused = false
         playUnpinSound()
