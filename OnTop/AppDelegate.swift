@@ -31,10 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        // Restore pinned windows to normal level before quitting —
-        // without this, windows that were elevated by CGSSetWindowLevel
-        // would stay floating until the next logout.
-        PinningEngine.shared.unpinAll()
+        // kAXRaiseAction doesn't make persistent window-level changes, so there's
+        // nothing to restore. Windows naturally settle back to their normal Z-order
+        // once we stop re-raising them.
         WindowTracker.shared.stop()
     }
 

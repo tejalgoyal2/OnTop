@@ -1,55 +1,58 @@
 // PinningEngine.swift
-// Applies "always on top" via the private CGSSetWindowLevel API.
 //
-// Strategy: when a window is pinned, call CGSSetWindowLevel to raise its CG
-// window level to kCGFloatingWindowLevel. Re-apply on every app-switch event
-// in case macOS resets it (WindowTracker drives the re-apply via didActivateApp).
+// Confirmed: CGSSetWindowLevel returns "success" (0) but silently does nothing
+// for windows owned by other processes (layerBefore=0, layerAfter=0).
+// The WindowServer accepts the call but ignores cross-process level changes
+// when using your own connection ID for a foreign window.
 //
-// CGSMainConnectionID() gives us the CG connection for our process.
-// The key question: does CGSSetWindowLevel work for windows we don't own?
+// Working approach: kAXRaiseAction via the Accessibility subsystem.
+// The AX framework has elevated WindowServer permissions (that's exactly why
+// Accessibility access is required). kAXRaiseAction reorders the target window
+// to the global Z-order front across all apps.
+//
+// We re-apply on every app-activation event (NSWorkspace notification).
+// Limitation discovered later: same-screen activation — the OS finishes
+// bringing the newly active app's windows to front AFTER our raise fires,
+// overriding it. Cross-screen works fine; same-screen is a race we lose.
 
 import AppKit
-import CoreGraphics
+import ApplicationServices
 
 final class PinningEngine {
     static let shared = PinningEngine()
     private init() {}
 
-    private let cgConnection = CGSMainConnectionID()
+    // MARK: - Raise
 
-    // MARK: - Pin / unpin
+    /// Bring a window to the global front via the AX raise action.
+    @discardableResult
+    func raise(axElement: AXUIElement) -> Bool {
+        let result = AXUIElementPerformAction(axElement, kAXRaiseAction as CFString)
+        return result == .success
+    }
 
-    /// Elevates the window to the floating level for its PinLevel.
+    /// Re-raise all pinned windows in priority order so the highest-level
+    /// window ends up on top.
+    func reapplyAll() {
+        let sorted = PinnedWindowsStore.shared.windows.sorted {
+            $0.level.rawValue < $1.level.rawValue
+        }
+        for w in sorted {
+            raise(axElement: w.axElement)
+        }
+    }
+
+    // MARK: - Pin / Unpin
+
+    /// Raise a window immediately when it's pinned — gives instant visual feedback.
     @discardableResult
     func pin(window: PinnedWindow) -> Bool {
-        let targetLevel = Int32(window.level.cgWindowLevel)
-        let result = CGSSetWindowLevel(cgConnection, window.windowID, targetLevel)
-
-        // Log everything — if this doesn't work, the log will tell us why.
-        print("[PinningEngine] CGSSetWindowLevel → \(result == 0 ? "SUCCESS" : "FAIL(\(result))")" +
-              "  windowID=\(window.windowID)  targetLevel=\(targetLevel)")
-        return result == 0
+        return raise(axElement: window.axElement)
     }
 
-    /// Resets the window back to normal level (kCGNormalWindowLevel = 0).
-    func unpin(windowID: CGWindowID) {
-        let result = CGSSetWindowLevel(cgConnection, windowID, Int32(kCGNormalWindowLevel))
-        if result != 0 {
-            print("[PinningEngine] unpin failed: CGSSetWindowLevel returned \(result)")
-        }
-    }
+    /// Unpinning has no OS-level state to undo — we simply stop re-raising the window.
+    func unpin(windowID: CGWindowID) {}
 
-    /// Resets all pinned windows — called on app quit so nothing stays floating.
-    func unpinAll() {
-        for w in PinnedWindowsStore.shared.windows {
-            unpin(windowID: w.windowID)
-        }
-    }
-
-    /// Re-assert levels for all pinned windows (called after app-switch events).
-    func reapplyAll() {
-        for w in PinnedWindowsStore.shared.windows {
-            pin(window: w)
-        }
-    }
+    /// No-op: kAXRaiseAction doesn't make persistent changes.
+    func unpinAll() {}
 }
